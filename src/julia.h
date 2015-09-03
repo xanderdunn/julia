@@ -1425,7 +1425,6 @@ DLLEXPORT extern volatile sig_atomic_t jl_defer_signal;
     } while(0)
 
 DLLEXPORT void jl_sigint_action(void);
-DLLEXPORT void restore_signals(void);
 DLLEXPORT void jl_install_sigint_handler(void);
 DLLEXPORT void jl_sigatomic_begin(void);
 DLLEXPORT void jl_sigatomic_end(void);
@@ -1476,6 +1475,8 @@ typedef struct {
     jl_task_t **proot_task;
     jl_value_t **pexception_in_transit;
     jl_value_t * volatile *ptask_arg_in_transit;
+    uv_thread_t system_id;
+    void *signal_context; // bt_context_t
 } jl_thread_task_state_t;
 
 extern DLLEXPORT JL_THREAD jl_task_t * volatile jl_current_task;
