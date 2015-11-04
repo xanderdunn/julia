@@ -969,7 +969,6 @@ static Function *to_function(jl_lambda_info_t *li)
         jl_rethrow_with_add("error compiling %s", li->name->name);
     }
     assert(f != NULL);
-    FPM->run(*f);
     //n_compile++;
     // print out the function's LLVM code
     //jl_static_show(JL_STDERR, (jl_value_t*)li);
@@ -1246,7 +1245,7 @@ void *jl_function_ptr(jl_function_t *f, jl_value_t *rt, jl_value_t *argt)
     }
 #endif
 #ifdef USE_MCJIT
-    return (void*)(intptr_t)jl_ExecutionEngine->getFunctionAddress(llvmf->getName());
+    return (void*)getAddressForOrCompileFunction(llvmf);
 #else
     return jl_ExecutionEngine->getPointerToFunction(llvmf);
 #endif
@@ -3105,7 +3104,7 @@ static jl_cgval_t emit_call(jl_value_t **args, size_t arglen, jl_codectx_t *ctx,
                 // builtin functions don't need the function object passed and are constant
                 std::map<jl_fptr_t,Function*>::iterator it = builtin_func_map.find(f->fptr);
                 if (it != builtin_func_map.end()) {
-                    theFptr = (*it).second;
+                    theFptr = prepare_call((*it).second);
                     theF = V_null;
                 }
             }
@@ -4239,8 +4238,6 @@ static Function *gen_cfun_wrapper(jl_function_t *ff, jl_value_t *jlrettype, jl_t
     cw->removeFromParent();
     active_module->getFunctionList().push_back(cw);
 
-    FPM->run(*cw);
-
     // Restore the previous compile context
     if (old != NULL) {
         builder.SetInsertPoint(old);
@@ -5277,7 +5274,6 @@ static Function *emit_function(jl_lambda_info_t *lam)
     if (fwrap) {
         fwrap->removeFromParent();
         active_module->getFunctionList().push_back(fwrap);
-        FPM->run(*fwrap);
     }
 
     // step 18. Perform any delayed instantiations
