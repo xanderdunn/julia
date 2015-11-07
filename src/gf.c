@@ -1450,7 +1450,7 @@ jl_function_t *jl_method_lookup(jl_methtable_t *mt, jl_value_t **args, size_t na
 DLLEXPORT jl_value_t *jl_matching_methods(jl_function_t *gf, jl_value_t *type, int lim);
 
 // compile-time method lookup
-jl_function_t *jl_get_specialization(jl_function_t *f, jl_tupletype_t *types)
+jl_function_t *jl_get_specialization(jl_function_t *f, jl_tupletype_t *types, void *cyclectx)
 {
     if (!jl_is_leaf_type((jl_value_t*)types))
         return NULL;
@@ -1491,7 +1491,7 @@ jl_function_t *jl_get_specialization(jl_function_t *f, jl_tupletype_t *types)
     if (sf->linfo->functionObject == NULL) {
         if (sf->fptr != &jl_trampoline)
             goto not_found;
-        jl_compile_linfo(sf->linfo);
+        jl_compile_linfo(sf->linfo, cyclectx);
     }
     JL_GC_POP();
     return sf;
@@ -1634,7 +1634,7 @@ static void _compile_all_deq(jl_array_t *found)
         if (jl_is_leaf_type((jl_value_t*)meth->sig)) {
             // usually can create a specialized version of the function,
             // if the signature is already a leaftype
-            jl_function_t *spec = jl_get_specialization(func, meth->sig);
+            jl_function_t *spec = jl_get_specialization(func, meth->sig, NULL);
             if (spec && !jl_has_typevars((jl_value_t*)meth->sig)) {
                 // replace unspecialized func with specialized version
                 // if there are no bound type vars (e.g. `call{K,V}(Dict{K,V})` vs `call(Dict)`)
@@ -1671,7 +1671,7 @@ static void _compile_all_deq(jl_array_t *found)
                             continue; // signature wouldn't be callable / is invalid -- skip it
                         }
                         if (jl_is_leaf_type(sig)) {
-                            if (jl_get_specialization(func, (jl_tupletype_t*)sig)) {
+                            if (jl_get_specialization(func, (jl_tupletype_t*)sig, NULL)) {
                                 if (!jl_has_typevars((jl_value_t*)sig)) continue;
                             }
                         }
@@ -1828,7 +1828,7 @@ void jl_compile_all(void)
 
 DLLEXPORT void jl_compile_hint(jl_function_t *f, jl_tupletype_t *types)
 {
-    (void)jl_get_specialization(f, types);
+    (void)jl_get_specialization(f, types, NULL);
 }
 
 #ifdef JL_TRACE
