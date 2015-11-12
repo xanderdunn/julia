@@ -274,126 +274,131 @@ static jl_value_t *scm_to_julia_(value_t e, int eo)
         return jl_false;
     if (e == FL_T)
         return jl_true;
-    if (e == FL_NIL) {
-        assert(0 && "Jeff doesn't think this is supposed to happen");
-    }
-    if (iscons(e)) {
-        value_t hd = car_(e);
-        if (hd == fl_jlgensym_sym) {
-            size_t genid = numval(car_(cdr_(e)));
-            return jl_box_gensym(genid);
-        }
-        if (hd == fl_null_sym && llength(e) == 1)
-            return jl_nothing;
-        if (issymbol(hd)) {
-            jl_sym_t *sym = scmsym_to_julia(hd);
-            /* tree node types:
-               goto  gotoifnot  label  return
-               lambda  call  =  quote
-               null  top  method
-               body  file new
-               line  enter  leave
-            */
-            size_t n = llength(e)-1;
-            size_t i;
-            if (sym == lambda_sym) {
-                jl_expr_t *ex = jl_exprn(lambda_sym, n);
-                e = cdr_(e);
-                value_t largs = car_(e);
-                jl_cellset(ex->args, 0, full_list(largs,eo));
-                e = cdr_(e);
-
-                value_t ee = car_(e);
-                jl_array_t *vinf = jl_alloc_cell_1d(4);
-                jl_cellset(vinf, 0, full_list_of_lists(car_(ee),eo));
-                ee = cdr_(ee);
-                jl_cellset(vinf, 1, full_list_of_lists(car_(ee),eo));
-                ee = cdr_(ee);
-                jl_cellset(vinf, 2, isfixnum(car_(ee)) ?
-                           jl_box_long(numval(car_(ee))) :
-                           full_list(car_(ee),eo));
-                ee = cdr_(ee);
-                jl_cellset(vinf, 3, full_list(car_(ee),eo));
-                assert(!iscons(cdr_(ee)));
-                jl_cellset(ex->args, 1, vinf);
-                e = cdr_(e);
-
-                for(i=2; i < n; i++) {
-                    assert(iscons(e));
-                    jl_cellset(ex->args, i, scm_to_julia_(car_(e), eo));
-                    e = cdr_(e);
-                }
-                jl_lambda_info_t *nli = jl_new_lambda_info((jl_value_t*)ex, jl_emptysvec, jl_current_module);
-                resolve_globals(nli->ast, nli);
-                return (jl_value_t*)nli;
-            }
-
-            e = cdr_(e);
-            if (!eo) {
-                if (sym == line_sym && n==2) {
-                    // NOTE: n==3 case exists: '(line, linenum, filename, funcname) passes
-                    //       the original name through to keyword-arg specializations.
-                    //       See 'line handling in julia-syntax.scm:keywords-method-def-expr
-                    jl_value_t *filename = NULL, *linenum = NULL;
-                    JL_GC_PUSH2(&filename, &linenum);
-                    filename = scm_to_julia_(car_(cdr_(e)),0);
-                    linenum  = scm_to_julia_(car_(e),0);
-                    jl_value_t *temp = jl_new_struct(jl_linenumbernode_type,
-                                                     filename, linenum);
-                    JL_GC_POP();
-                    return temp;
-                }
-                jl_value_t *scmv = NULL, *temp = NULL;
-                JL_GC_PUSH1(&scmv);
-                if (sym == label_sym) {
-                    scmv = scm_to_julia_(car_(e),0);
-                    temp = jl_new_struct(jl_labelnode_type, scmv);
-                    JL_GC_POP();
-                    return temp;
-                }
-                if (sym == goto_sym) {
-                    scmv = scm_to_julia_(car_(e),0);
-                    temp = jl_new_struct(jl_gotonode_type, scmv);
-                    JL_GC_POP();
-                    return temp;
-                }
-                if (sym == inert_sym || (sym == quote_sym && (!iscons(car_(e))))) {
-                    scmv = scm_to_julia_(car_(e),0);
-                    temp = jl_new_struct(jl_quotenode_type, scmv);
-                    JL_GC_POP();
-                    return temp;
-                }
-                if (sym == top_sym) {
-                    scmv = scm_to_julia_(car_(e),0);
-                    temp = jl_new_struct(jl_topnode_type, scmv);
-                    JL_GC_POP();
-                    return temp;
-                }
-                if (sym == newvar_sym) {
-                    scmv = scm_to_julia_(car_(e),0);
-                    temp = jl_new_struct(jl_newvarnode_type, scmv);
-                    JL_GC_POP();
-                    return temp;
-                }
-                JL_GC_POP();
-            }
-            else if (sym == inert_sym && !iscons(car_(e))) {
-                sym = quote_sym;
-            }
-            jl_expr_t *ex = jl_exprn(sym, n);
-            // allocate a fresh args array for empty exprs passed to macros
-            if (eo && n == 0)
-                ex->args = jl_alloc_cell_1d(0);
-            for(i=0; i < n; i++) {
-                assert(iscons(e));
-                jl_cellset(ex->args, i, scm_to_julia_(car_(e),eo));
-                e = cdr_(e);
-            }
-            return (jl_value_t*)ex;
+    if (iscons(e) || e == FL_NIL) {
+        value_t hd;
+        jl_sym_t *sym;
+        if (e == FL_NIL) {
+            hd = e;
         }
         else {
-            jl_error("malformed tree");
+            hd = car_(e);
+            if (hd == fl_jlgensym_sym) {
+                size_t genid = numval(car_(cdr_(e)));
+                return jl_box_gensym(genid);
+            }
+            if (hd == fl_null_sym && llength(e) == 1)
+                return jl_nothing;
         }
+        if (issymbol(hd))
+            sym = scmsym_to_julia(hd);
+        else
+            sym = jl_symbol("list");
+        /* tree node types:
+           goto  gotoifnot  label  return
+           lambda  call  =  quote
+           null  top  method
+           body  file new
+           line  enter  leave
+        */
+        size_t n = llength(e)-1;
+        size_t i;
+        if (sym == lambda_sym) {
+            jl_expr_t *ex = jl_exprn(lambda_sym, n);
+            e = cdr_(e);
+            value_t largs = car_(e);
+            jl_cellset(ex->args, 0, full_list(largs,eo));
+            e = cdr_(e);
+            
+            value_t ee = car_(e);
+            jl_array_t *vinf = jl_alloc_cell_1d(4);
+            jl_cellset(vinf, 0, full_list_of_lists(car_(ee),eo));
+            ee = cdr_(ee);
+            jl_cellset(vinf, 1, full_list_of_lists(car_(ee),eo));
+            ee = cdr_(ee);
+            jl_cellset(vinf, 2, isfixnum(car_(ee)) ?
+                       jl_box_long(numval(car_(ee))) :
+                       full_list(car_(ee),eo));
+            ee = cdr_(ee);
+            jl_cellset(vinf, 3, full_list(car_(ee),eo));
+            assert(!iscons(cdr_(ee)));
+            jl_cellset(ex->args, 1, vinf);
+            e = cdr_(e);
+            
+            for(i=2; i < n; i++) {
+                assert(iscons(e));
+                jl_cellset(ex->args, i, scm_to_julia_(car_(e), eo));
+                e = cdr_(e);
+            }
+            jl_lambda_info_t *nli = jl_new_lambda_info((jl_value_t*)ex, jl_emptysvec, jl_current_module);
+            resolve_globals(nli->ast, nli);
+            return (jl_value_t*)nli;
+        }
+
+        if (issymbol(hd))
+            e = cdr_(e);
+        else
+            n++;
+        if (!eo) {
+            if (sym == line_sym && n==2) {
+                // NOTE: n==3 case exists: '(line, linenum, filename, funcname) passes
+                //       the original name through to keyword-arg specializations.
+                //       See 'line handling in julia-syntax.scm:keywords-method-def-expr
+                jl_value_t *filename = NULL, *linenum = NULL;
+                JL_GC_PUSH2(&filename, &linenum);
+                filename = scm_to_julia_(car_(cdr_(e)),0);
+                linenum  = scm_to_julia_(car_(e),0);
+                jl_value_t *temp = jl_new_struct(jl_linenumbernode_type,
+                                                 filename, linenum);
+                JL_GC_POP();
+                return temp;
+            }
+            jl_value_t *scmv = NULL, *temp = NULL;
+            JL_GC_PUSH1(&scmv);
+            if (sym == label_sym) {
+                scmv = scm_to_julia_(car_(e),0);
+                temp = jl_new_struct(jl_labelnode_type, scmv);
+                JL_GC_POP();
+                return temp;
+            }
+            if (sym == goto_sym) {
+                scmv = scm_to_julia_(car_(e),0);
+                temp = jl_new_struct(jl_gotonode_type, scmv);
+                JL_GC_POP();
+                return temp;
+            }
+            if (sym == inert_sym || (sym == quote_sym && (!iscons(car_(e))))) {
+                scmv = scm_to_julia_(car_(e),0);
+                temp = jl_new_struct(jl_quotenode_type, scmv);
+                JL_GC_POP();
+                return temp;
+            }
+            if (sym == top_sym) {
+                scmv = scm_to_julia_(car_(e),0);
+                temp = jl_new_struct(jl_topnode_type, scmv);
+                JL_GC_POP();
+                return temp;
+            }
+            if (sym == newvar_sym) {
+                scmv = scm_to_julia_(car_(e),0);
+                temp = jl_new_struct(jl_newvarnode_type, scmv);
+                JL_GC_POP();
+                return temp;
+            }
+            JL_GC_POP();
+        }
+        else if (sym == inert_sym && !iscons(car_(e))) {
+            sym = quote_sym;
+        }
+        jl_expr_t *ex = jl_exprn(sym, n);
+        // allocate a fresh args array for empty exprs passed to macros
+        if (eo && n == 0)
+            ex->args = jl_alloc_cell_1d(0);
+        for(i=0; i < n; i++) {
+            assert(iscons(e));
+            jl_cellset(ex->args, i, scm_to_julia_(car_(e),eo));
+            e = cdr_(e);
+        }
+        return (jl_value_t*)ex;
     }
     if (iscprim(e) && cp_class((cprim_t*)ptr(e))==wchartype) {
         jl_value_t *wc =
@@ -488,7 +493,11 @@ static value_t julia_to_scm_(jl_value_t *v)
             car_(args) = llist;
             fl_free_gc_handles(1);
         }
-        value_t scmv = fl_cons(hd, args);
+        value_t scmv;
+        if (ex->head == jl_symbol("list"))
+            scmv = args;
+        else
+            scmv = fl_cons(hd, args);
         fl_free_gc_handles(1);
         return scmv;
     }

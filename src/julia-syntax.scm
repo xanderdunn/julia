@@ -392,16 +392,6 @@
                                    "__")))
           (flags (map (lambda (x) (gensy)) vals)))
       `(block
-        ;; call with keyword args pre-sorted - original method code goes here
-        ,(method-def-expr-
-          mangled sparams
-          `((|::| ,mangled (call (top typeof) ,mangled)) ,@vars ,@restkw ,(decl-var (car pargl)) ,@(cdr pargl) ,@vararg)
-          `(block
-            ,@(if (null? lno) '()
-                  ;; TODO jb/functions get a better `name` for functions specified by type
-                  (list (append (car lno) (list (undot-name name)))))
-            ,@stmts) isstaged)
-
         ;; call with no keyword args
         ,(method-def-expr-
           name positional-sparams (append pargl vararg)
@@ -420,6 +410,16 @@
                           ,@(if (null? vararg) '()
                                 (list `(... ,(arg-name (car vararg))))))))
           #f)
+
+        ;; call with keyword args pre-sorted - original method code goes here
+        ,(method-def-expr-
+          mangled sparams
+          `((|::| ,mangled (call (top typeof) ,mangled)) ,@vars ,@restkw ,@pargl ,@vararg)
+          `(block
+            ,@(if (null? lno) '()
+                  ;; TODO jb/functions get a better `name` for functions specified by type
+                  (list (append (car lno) (list (undot-name name)))))
+            ,@stmts) isstaged)
 
         ;; call with unsorted keyword args. this sorts and re-dispatches.
         ,(method-def-expr-
@@ -2208,19 +2208,20 @@
         ((block)
          (if (length= e 2)
              (to-lff (cadr e) dest tail)
-             (let* ((g (make-jlgensym))
+             (let* ((val (last e))
+		    (g (make-jlgensym))
                     (stmts
                      (let loop ((tl (cdr e)))
                        (if (null? tl) '()
                            (if (null? (cdr tl))
-                               (cond ((or tail (eq? dest #f) (symbol-like? dest))
+                               (cond ((or tail (eq? dest #f) (symbol-like? dest) (symbol-like? val))
                                       (blk-tail (to-lff (car tl) dest tail)))
                                      (else
                                       (blk-tail (to-lff (car tl) g tail))))
                                (cons (to-blk (to-lff (car tl) #f #f))
                                      (loop (cdr tl))))))))
                (if (and (eq? dest #t) (not tail))
-                   (cons g (reverse stmts))
+                   (cons (if (symbol-like? val) val g) (reverse stmts))
                    (if (and tail (null? stmts))
                        (cons '(return (null))
                              '())
@@ -2311,8 +2312,13 @@
                (cons (if tail `(return ,ex) ex)
                      '()))))
 
-        ((module)
-         (cons e '()))
+        ((module) (cons e '()))
+	;; TODO: something needs to be done here, but things seem to depend
+	;; on the current somewhat-broken behavior in a fragile way.
+	#;((toplevel)  ;; don't move things out of toplevel blocks
+	 (let ((r (map-to-lff e dest tail)))
+	   (let ((ex `(toplevel ,@(reverse (cdr r)) ,@((if tail cdadr cdr) (car r)))))
+	     (cons (if tail `(return ,ex) ex) '()))))
 
         ((symbolicgoto symboliclabel)
          (cons (if tail '(return (null)) '(null))
@@ -2796,12 +2802,16 @@ a __hidden__ submodule
 	t)))
 
 ;; replace leading (function) argument type with `typ`
-(define (fix-function-arg-type te typ iskw)
+(define (fix-function-arg-type te typ iskw namemap)
   (let* ((typapp (caddr te))
-         (types  (cdddr typapp))
+         (types  (pattern-replace
+		  (pattern-set
+		   (pattern-lambda (call (call (top (-/ getfield)) (-/ Core) (quote (-/ Typeof))) name)
+				   (get namemap name __)))
+		  (cdddr typapp)))
          (newtypes
           (if iskw
-              `((call (call (top getfield) Core 'kwftype) ,typ) ,(cadr types) ,typ ,@(cdddr types))
+              `(,(car types) #;(call (call (top getfield) Core 'kwftype) ,typ) ,(cadr types) ,typ ,@(cdddr types))
               `(,typ ,@(cdr types)))))
     `(call (top svec) (call (top apply_type) Tuple ,@newtypes)
 	   ,(cadddr te))))
@@ -2977,11 +2987,11 @@ a __hidden__ submodule
                          ,@(if exists
                                '()
                                (list
-                                (begin (put! namemap name tname)
+                                (begin (and name (put! namemap name tname))
                                        typedef)))
                          ,@sp-inits
                          (method #f
-                                 ,(fix-function-arg-type sig tname iskw)
+                                 ,(fix-function-arg-type sig tname iskw namemap)
                                  ,(convert-lambda lam2
                                                   (if iskw
                                                       (caddr (lam:args lam2))
@@ -2995,30 +3005,30 @@ a __hidden__ submodule
                                   (convert-assignment name mk-closure fname lam)
                                   ;; otherwise, adding method with free variables to a global function.
                                   ;; lowered to @eval f(x, y...) = ($(clo(fv)))(x, y...)
-                                  (let* ((def-args
-                                          (map (lambda (arg type)
-                                                 (if (symbol? arg)
-                                                     `(|::| ,arg ,type)
-                                                     arg))
-                                               (cadr lam2)
-                                               ;; TODO jb/functions this doesn't handle static parameters
-                                               (cdddr (caddr (caddr e)))))
-                                         (pass-args
+                                  (let* ((pass-args
                                           (map (lambda (arg) (if (symbol? arg)
                                                                  arg
                                                                  (list '... arg)))
-                                               (cadr lam2)))
-                                         (head (begin0 (or (cadr e)
-                                                           (car def-args))
-                                                       (set! def-args (cdr def-args))
-                                                       (set! pass-args (cdr pass-args)))))
+                                               (cadr lam2))))
+				    ;; TODO: idea: allow the lambda in a method expr to be evaluated.
+				    ;; then we can use the same method header but generate a backquote
+				    ;; expr to interpolate captured things instead of creating a separate
+				    ;; function and closure. the problem with the separate closure is that
+				    ;; it doesn't delegate the correct function arg (e.g. in keyword arg defs).
                                     `(call
                                       (top eval)
                                       ,(current-julia-module)
                                       ,(cadr
                                         (julia-expand-for-cl-convert
                                          `(quote
-                                           (= (call ,head ,@def-args)
+					   (block
+					   (method #f ,(caddr e)
+						   (lambda ,(cadr lam2)
+						     ,(caddr lam2)
+						     (body
+						      (return (call ($ ,mk-closure) ,@pass-args))))
+						   ,(last e)))
+                                           #;(= (call ,head ,@def-args)
                                               (call ($ ,mk-closure)
                                                     ,@pass-args)))))))))))))))
 	  ((lambda)  ;; should only happen inside (thunk ...)
