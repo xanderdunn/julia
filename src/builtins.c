@@ -476,38 +476,6 @@ JL_CALLABLE(jl_f__apply)
     return result;
 }
 
-JL_CALLABLE(jl_f_kwcall)
-{
-    if (nargs < 3)
-        jl_error("internal error: malformed keyword argument call");
-    size_t nkeys = jl_unbox_long(args[0]);
-    size_t pa = 3 + 2*nkeys;
-    jl_array_t *container = (jl_array_t*)args[pa-2];
-    assert(jl_array_len(container) > 0);
-    jl_function_t *f = (jl_function_t*)args[pa-1];
-
-    jl_function_t *sorter = jl_gf_mtable(f)->kwsorter;
-    if (sorter == NULL) {
-        jl_exceptionf(jl_argumenterror_type, "function %s does not accept keyword arguments",
-                      jl_symbol_name(jl_gf_name(f)));
-    }
-
-    for(size_t i=0; i < nkeys*2; i+=2) {
-        jl_cellset(container, i  , args[1+i]);
-        jl_cellset(container, i+1, args[1+i+1]);
-    }
-
-    args += pa-2;
-    nargs -= pa-2;
-    jl_lambda_info_t *m = jl_method_lookup(jl_gf_mtable(sorter), args, nargs, 1);
-    if (m == NULL) {
-        jl_no_method_error(f, args+2, nargs-2);
-        // unreachable
-    }
-
-    return jl_call_method_internal(m, args, nargs);
-}
-
 // eval -----------------------------------------------------------------------
 
 extern int jl_lineno;
@@ -1091,7 +1059,7 @@ jl_value_t *jl_mk_builtin_func(const char *name, jl_fptr_t fptr)
 
 jl_fptr_t jl_get_builtin_fptr(jl_value_t *b)
 {
-    assert(jl_subtype(b, jl_builtin_type, 1));
+    assert(jl_subtype(b, (jl_value_t*)jl_builtin_type, 1));
     return jl_gf_mtable(b)->cache->func->fptr;
 }
 
@@ -1130,7 +1098,6 @@ void jl_init_primitives(void)
     // internal functions
     add_builtin_func("apply_type", jl_f_apply_type);
     add_builtin_func("_apply", jl_f__apply);
-    add_builtin_func("kwcall", jl_f_kwcall);
     add_builtin_func("_expr", jl_f__expr);
     add_builtin_func("svec", jl_f_svec);
 

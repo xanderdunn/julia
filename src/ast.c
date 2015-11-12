@@ -75,8 +75,7 @@ value_t fl_invoke_julia_macro(value_t *args, uint32_t nargs)
         margs[0] = scm_to_julia(args[0], 1);
         f = (jl_lambda_info_t*)jl_toplevel_eval(margs[0]);
         assert(jl_is_lambda_info(f));
-        // TODO jb/functions: macro func should have self argument prepended
-        result = jl_call_method_internal(f, &margs[1], nargs>1 ? nargs-1 : 1);
+        result = jl_call_method_internal(f, margs, nargs);
     }
     JL_CATCH {
         JL_GC_POP();

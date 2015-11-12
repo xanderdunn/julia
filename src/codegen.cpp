@@ -3464,38 +3464,20 @@ static jl_cgval_t emit_expr(jl_value_t *expr, jl_codectx_t *ctx, bool isboxed, b
     }
     else if (head == method_sym) {
         jl_value_t *mn = args[0];
-        bool iskw = false;
-        Value *theF = NULL;
-        if (jl_is_expr(mn) || jl_is_globalref(mn)) {
-            if (jl_is_expr(mn) && ((jl_expr_t*)mn)->head == kw_sym) {
-                iskw = true;
-                mn = jl_exprarg(mn,0);
-            }
-            theF = boxed(emit_expr(mn, ctx), ctx);
-            if (jl_is_expr(mn)) {
-                mn = jl_fieldref(jl_exprarg(mn, 2), 0);
-            }
-        }
-        if (jl_is_symbolnode(mn)) {
+        if (jl_is_symbolnode(mn))
             mn = (jl_value_t*)jl_symbolnode_sym(mn);
-        }
-        assert(jl_is_symbol(mn));
-        int last_depth = ctx->gc.argDepth;
-        Value *name = literal_pointer_val(mn);
-        jl_binding_t *bnd = NULL;
-        Value *bp, *bp_owner = V_null;
-        if (theF != NULL) {
-            bp = make_gcroot(theF, ctx);
-        }
-        else {
+        if (jl_expr_nargs(ex) == 1) {
+            assert(jl_is_symbol(mn));
+            Value *name = literal_pointer_val(mn);
+            jl_binding_t *bnd = NULL;
+            Value *bp, *bp_owner = V_null;
             if (is_global((jl_sym_t*)mn, ctx)) {
                 bnd = jl_get_binding_for_method_def(ctx->module, (jl_sym_t*)mn);
                 bp = julia_binding_gv(bnd);
                 bp_owner = literal_pointer_val((jl_value_t*)ctx->module);
             }
             else {
-                jl_sym_t *s = (jl_sym_t*)mn;
-                jl_varinfo_t &vi = ctx->vars[s];
+                jl_varinfo_t &vi = ctx->vars[(jl_sym_t*)mn];
                 bp = vi.memloc;
                 if (vi.isBox) {
                     // bp is a jl_box_t*
@@ -3503,28 +3485,21 @@ static jl_cgval_t emit_expr(jl_value_t *expr, jl_codectx_t *ctx, bool isboxed, b
                     bp_owner = builder.CreateBitCast(bp, T_pjlvalue);
                 }
             }
-        }
-        if (jl_expr_nargs(ex) == 1) {
             Value *mdargs[4] = { name, bp, bp_owner, literal_pointer_val(bnd) };
             return mark_julia_type(
                     builder.CreateCall(prepare_call(jlgenericfunction_func), ArrayRef<Value*>(&mdargs[0], 4)),
                     true,
                     jl_function_type);
         }
-        else {
-            Value *a1 = boxed(emit_expr(args[1], ctx),ctx);
-            make_gcroot(a1, ctx);
-            Value *a2 = boxed(emit_expr(args[2], ctx),ctx);
-            make_gcroot(a2, ctx);
-            Value *mdargs[8] =
-                { name, bp, bp_owner, literal_pointer_val(bnd), a1, a2, literal_pointer_val(args[3]),
-                  ConstantInt::get(T_int32, (int)iskw) };
-            ctx->gc.argDepth = last_depth;
-            return mark_julia_type(
-                    builder.CreateCall(prepare_call(jlmethod_func), ArrayRef<Value*>(&mdargs[0], 8)),
-                    true,
-                    jl_function_type);
-        }
+        int last_depth = ctx->gc.argDepth;
+        Value *a1 = boxed(emit_expr(args[1], ctx),ctx);
+        make_gcroot(a1, ctx);
+        Value *a2 = boxed(emit_expr(args[2], ctx),ctx);
+        make_gcroot(a2, ctx);
+        Value *mdargs[3] = { a1, a2, literal_pointer_val(args[3]) };
+        ctx->gc.argDepth = last_depth;
+        builder.CreateCall(prepare_call(jlmethod_func), ArrayRef<Value*>(&mdargs[0], 3));
+        return ghostValue(jl_void_type);
     }
     else if (head == const_sym) {
         jl_sym_t *sym = (jl_sym_t*)args[0];
@@ -5516,7 +5491,6 @@ static void init_julia_llvm_env(Module *m)
     builtin_func_map[jl_f_isa] = jlcall_func_to_llvm("jl_f_isa", (void*)&jl_f_isa, m);
     builtin_func_map[jl_f_typeassert] = jlcall_func_to_llvm("jl_f_typeassert", (void*)&jl_f_typeassert, m);
     builtin_func_map[jl_f__apply] = jlcall_func_to_llvm("jl_f__apply", (void*)&jl_f__apply, m);
-    builtin_func_map[jl_f_kwcall] = jlcall_func_to_llvm("jl_f_kwcall", (void*)&jl_f_kwcall, m);
     builtin_func_map[jl_f_throw] = jlcall_func_to_llvm("jl_f_throw", (void*)&jl_f_throw, m);
     builtin_func_map[jl_f_tuple] = jlcall_func_to_llvm("jl_f_tuple", (void*)&jl_f_tuple, m);
     builtin_func_map[jl_f_svec] = jlcall_func_to_llvm("jl_f_svec", (void*)&jl_f_svec, m);
@@ -5595,15 +5569,10 @@ static void init_julia_llvm_env(Module *m)
 
     std::vector<Type*> mdargs(0);
     mdargs.push_back(T_pjlvalue);
-    mdargs.push_back(T_ppjlvalue);
     mdargs.push_back(T_pjlvalue);
     mdargs.push_back(T_pjlvalue);
-    mdargs.push_back(T_pjlvalue);
-    mdargs.push_back(T_pjlvalue);
-    mdargs.push_back(T_pjlvalue);
-    mdargs.push_back(T_int32);
     jlmethod_func =
-        Function::Create(FunctionType::get(T_pjlvalue, mdargs, false),
+        Function::Create(FunctionType::get(T_void, mdargs, false),
                          Function::ExternalLinkage,
                          "jl_method_def", m);
     add_named_global(jlmethod_func, (void*)&jl_method_def);

@@ -563,6 +563,7 @@ void _julia_init(JL_IMAGE_SEARCH rel)
 
     if (!jl_options.image_file) {
         jl_core_module = jl_new_module(jl_symbol("Core"));
+        jl_type_type->name->mt->module = jl_core_module;
         jl_top_module = jl_core_module;
         jl_init_intrinsic_functions();
         jl_init_primitives();
@@ -793,14 +794,13 @@ void jl_get_builtins(void)
     jl_builtin_typeof = core("typeof");         jl_builtin_sizeof = core("sizeof");
     jl_builtin_issubtype = core("issubtype");   jl_builtin_isa = core("isa");
     jl_builtin_typeassert = core("typeassert"); jl_builtin__apply = core("_apply");
-    jl_builtin_kwcall = core("kwcall");         jl_builtin_isdefined = core("isdefined");
+    jl_builtin_isdefined = core("isdefined");   jl_builtin_nfields = core("nfields");
     jl_builtin_tuple = core("tuple");           jl_builtin_svec = core("svec");
     jl_builtin_getfield = core("getfield");     jl_builtin_setfield = core("setfield!");
     jl_builtin_fieldtype = core("fieldtype");   jl_builtin_arrayref = core("arrayref");
     jl_builtin_arrayset = core("arrayset");     jl_builtin_arraysize = core("arraysize");
     jl_builtin_apply_type = core("apply_type"); jl_builtin_applicable = core("applicable");
     jl_builtin_invoke = core("invoke");         jl_builtin__expr = core("_expr");
-    jl_builtin_nfields = core("nfields");
 }
 
 #ifdef __cplusplus

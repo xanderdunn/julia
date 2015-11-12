@@ -148,7 +148,8 @@ export
     # object model functions
     fieldtype, getfield, setfield!, nfields, throw, tuple, is, ===, isdefined, eval,
     # arrayref, arrayset, arraysize,
-    # _apply, kwcall,
+    # _apply,
+    kwfunc,
     # sizeof    # not exported, to avoid conflicting with Base.sizeof
     # type reflection
     issubtype, typeof, isa,
@@ -211,6 +212,9 @@ end
 
 abstract AbstractString
 
+function Typeof end
+(f::typeof(Typeof))(x::ANY) = isa(x,Type) ? Type{x} : typeof(x)
+
 abstract Exception
 immutable BoundsError        <: Exception
     a::Any
@@ -261,6 +265,17 @@ include(fname::ByteString) = ccall(:jl_load_, Any, (Any,), fname)
 
 eval(e::ANY) = eval(Main, e)
 eval(m::Module, e::ANY) = ccall(:jl_toplevel_eval_in, Any, (Any, Any), m, e)
+
+kwfunc(f::ANY) = typeof(f).name.mt.kwsorter
+
+function kwftype(t::ANY)
+    mt = t.name.mt
+    if isdefined(mt, :kwsorter)
+    else
+        mt.kwsorter = ccall(:jl_new_generic_function, Any, (Any, Any), mt.name, mt.module)
+    end
+    typeof(mt.kwsorter)
+end
 
 # constructors for built-in types
 

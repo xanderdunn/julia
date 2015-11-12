@@ -3577,7 +3577,6 @@ void jl_init_types(void)
     type_goto_sym = jl_symbol("type_goto");
     toplevel_sym = jl_symbol("toplevel");
     tuple_sym = jl_symbol("tuple");
-    kw_sym = jl_symbol("kw");
     dot_sym = jl_symbol(".");
     boundscheck_sym = jl_symbol("boundscheck");
     fastmath_sym = jl_symbol("fastmath");

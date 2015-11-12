@@ -554,7 +554,7 @@ extern jl_sym_t *null_sym;    extern jl_sym_t *body_sym;
 extern jl_sym_t *macro_sym;   extern jl_sym_t *method_sym;
 extern jl_sym_t *enter_sym;   extern jl_sym_t *leave_sym;
 extern jl_sym_t *exc_sym;     extern jl_sym_t *new_sym;
-extern jl_sym_t *static_typeof_sym; extern jl_sym_t *kw_sym;
+extern jl_sym_t *static_typeof_sym;
 extern jl_sym_t *const_sym;   extern jl_sym_t *thunk_sym;
 extern jl_sym_t *anonymous_sym;  extern jl_sym_t *underscore_sym;
 extern jl_sym_t *abstracttype_sym; extern jl_sym_t *bitstype_sym;
@@ -1049,15 +1049,14 @@ DLLEXPORT jl_sym_t *jl_gensym(void);
 DLLEXPORT jl_sym_t *jl_tagged_gensym(const char *str, int32_t len);
 DLLEXPORT jl_sym_t *jl_get_root_symbol(void);
 jl_expr_t *jl_exprn(jl_sym_t *head, size_t n);
-jl_function_t *jl_new_generic_function(jl_sym_t *name, jl_module_t *module);
+DLLEXPORT jl_function_t *jl_new_generic_function(jl_sym_t *name, jl_module_t *module);
 void jl_add_method(jl_function_t *gf, jl_tupletype_t *types, jl_lambda_info_t *meth,
                    jl_svec_t *tvars, int8_t isstaged);
 void jl_add_method_to_table(jl_methtable_t *mt, jl_tupletype_t *types, jl_lambda_info_t *meth,
                             jl_svec_t *tvars, int8_t isstaged);
 DLLEXPORT jl_value_t *jl_generic_function_def(jl_sym_t *name, jl_value_t **bp, jl_value_t *bp_owner,
                                               jl_binding_t *bnd);
-DLLEXPORT jl_value_t *jl_method_def(jl_sym_t *name, jl_value_t **bp, jl_value_t *bp_owner, jl_binding_t *bnd,
-                                    jl_svec_t *argtypes, jl_lambda_info_t *f, jl_value_t *isstaged, int iskw);
+DLLEXPORT void jl_method_def(jl_svec_t *argdata, jl_lambda_info_t *f, jl_value_t *isstaged);
 DLLEXPORT jl_value_t *jl_box_bool(int8_t x);
 DLLEXPORT jl_value_t *jl_box_int8(int8_t x);
 DLLEXPORT jl_value_t *jl_box_uint8(uint8_t x);

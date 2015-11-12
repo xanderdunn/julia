@@ -229,20 +229,8 @@ static jl_value_t *eval(jl_value_t *e, jl_value_t **locals, size_t nl, size_t ng
         jl_value_t **bp=NULL;
         jl_value_t *bp_owner=NULL;
         jl_binding_t *b=NULL;
-        jl_value_t *gf=NULL;
-        int kw=0;
-        if (jl_is_expr(fname) || jl_is_globalref(fname)) {
-            if (jl_is_expr(fname) && ((jl_expr_t*)fname)->head == kw_sym) {
-                kw = 1;
-                fname = (jl_sym_t*)jl_exprarg(fname, 0);
-            }
-            gf = eval((jl_value_t*)fname, locals, nl, ngensym);
-            if (jl_is_expr(fname))
-                fname = (jl_sym_t*)jl_fieldref(jl_exprarg(fname, 2), 0);
-            bp = &gf;
+        if (jl_expr_nargs(ex) == 1) {
             assert(jl_is_symbol(fname));
-        }
-        else {
             for (size_t i=0; i < nl; i++) {
                 if (locals[i*2] == (jl_value_t*)fname) {
                     bp = &locals[i*2+1];
@@ -254,9 +242,9 @@ static jl_value_t *eval(jl_value_t *e, jl_value_t **locals, size_t nl, size_t ng
                 bp = &b->value;
                 bp_owner = (jl_value_t*)jl_current_module;
             }
-        }
-        if (jl_expr_nargs(ex) == 1)
             return jl_generic_function_def(fname, bp, bp_owner, b);
+        }
+
         jl_value_t *atypes=NULL, *meth=NULL;
         JL_GC_PUSH2(&atypes, &meth);
         atypes = eval(args[1], locals, nl, ngensym);
@@ -265,9 +253,9 @@ static jl_value_t *eval(jl_value_t *e, jl_value_t **locals, size_t nl, size_t ng
         }
         meth = args[2];
         assert(jl_is_lambda_info(meth));
-        jl_method_def(fname, bp, bp_owner, b, (jl_svec_t*)atypes, (jl_lambda_info_t*)meth, args[3], kw);
+        jl_method_def((jl_svec_t*)atypes, (jl_lambda_info_t*)meth, args[3]);
         JL_GC_POP();
-        return *bp;
+        return jl_nothing;
     }
     else if (ex->head == copyast_sym) {
         return jl_copy_ast(eval(args[0], locals, nl, ngensym));

@@ -1988,7 +1988,7 @@ void print_func_loc(JL_STREAM *s, jl_lambda_info_t *li)
     }
 }
 
-jl_function_t *jl_new_generic_function(jl_sym_t *name, jl_module_t *module)
+DLLEXPORT jl_function_t *jl_new_generic_function(jl_sym_t *name, jl_module_t *module)
 {
     jl_datatype_t *ftype = jl_new_datatype(name, jl_function_type, jl_emptysvec,
                                            jl_emptysvec, jl_emptysvec, 0, 0, 0);

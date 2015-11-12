@@ -803,7 +803,6 @@ function abstract_apply(af::ANY, fargs, aargtypes::Vector{Any}, vtypes, sv, e)
         end
         return abstract_call(af, (), at, vtypes, sv, ())
     end
-    is(af,kwcall) && return Any
     # apply known function with unknown args => f(Any...)
     return abstract_call(af, (), Any[Vararg{Any}], vtypes, sv, ())
 end
@@ -933,26 +932,6 @@ function abstract_call(f::ANY, fargs, argtypes::Vector{Any}, vtypes, sv::StaticV
         if !is(val,false)
             return abstract_eval_constant(_ieval(val))
         end
-    end
-    if is(f,kwcall)
-        if length(argtypes) < 3
-            return Bottom
-        end
-        if length(fargs) < 3
-            return Any
-        end
-        kwcount = fargs[1]
-        ff = isconstantfunc(fargs[2 + 2*kwcount], sv)
-        if !(ff===false)
-            ff = _ieval(ff); mt = typeof(ff).name.mt
-            if isdefined(mt, :kwsorter)
-                # use the fact that kwcall(...) calls mt.kwsorter
-                posargt = argtypes[(3+2*kwcount):end]
-                return abstract_call_gf(mt.kwsorter, (),
-                                        Tuple{Array{Any,1}, posargt...}, e)
-            end
-        end
-        return Any
     end
     if isa(f,Builtin) || isa(f,IntrinsicFunction)
         rt = builtin_tfunction(f, fargs, Tuple{argtypes...})

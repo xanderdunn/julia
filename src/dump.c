@@ -74,8 +74,7 @@ static jl_fptr_t id_to_fptrs[] = {
   jl_f_typeassert, jl_f__apply, jl_f_isdefined, jl_f_tuple, jl_f_svec,
   jl_f_getfield, jl_f_setfield, jl_f_fieldtype, jl_f_nfields,
   jl_f_arrayref, jl_f_arrayset, jl_f_arraysize, jl_f_apply_type,
-  jl_f_kwcall, jl_f_applicable, jl_f_invoke,
-  jl_unprotect_stack, jl_f_sizeof, jl_f__expr,
+  jl_f_applicable, jl_f_invoke, jl_unprotect_stack, jl_f_sizeof, jl_f__expr,
   jl_f_intrinsic_call,
   NULL };
 
@@ -1814,7 +1813,7 @@ void jl_restore_system_image_from_stream(ios_t *f)
     jl_top_module = (jl_module_t*)jl_deserialize_value(f, NULL);
     jl_internal_main_module = jl_main_module;
     jl_typeinf_func = (jl_function_t*)jl_deserialize_value(f, NULL);
-    jl_type_type->name->mt = jl_deserialize_value(f, NULL);
+    jl_type_type->name->mt = (jl_methtable_t*)jl_deserialize_value(f, NULL);
     jl_typector_type->name->mt = jl_uniontype_type->name->mt = jl_datatype_type->name->mt =
         jl_type_type->name->mt;
 
