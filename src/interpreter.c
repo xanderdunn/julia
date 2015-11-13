@@ -251,8 +251,19 @@ static jl_value_t *eval(jl_value_t *e, jl_value_t **locals, size_t nl, size_t ng
         if (jl_is_lambda_info(args[2])) {
             jl_check_static_parameter_conflicts((jl_lambda_info_t*)args[2], (jl_svec_t*)jl_svecref(atypes,1), fname);
         }
-        meth = args[2];
-        assert(jl_is_lambda_info(meth));
+        if (jl_is_lambda_info(args[2])) {
+            meth = args[2];
+        }
+        else {
+            jl_value_t *jl_macroexpand(jl_value_t *expr);
+            meth = eval(args[2], locals, nl, ngensym);
+            assert(jl_is_expr(meth) && ((jl_expr_t*)meth)->head == lambda_sym);
+            // TODO jb/functions
+            // calling macroexpand is a hack to make sure the lambda info lists are
+            // correctly formatted by sending through julia_to_scm then scm_to_julia.
+            meth = jl_macroexpand(meth);
+            assert(jl_is_lambda_info(meth));
+        }
         jl_method_def((jl_svec_t*)atypes, (jl_lambda_info_t*)meth, args[3]);
         JL_GC_POP();
         return jl_nothing;

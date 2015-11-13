@@ -1298,12 +1298,16 @@
                             `(block (= (tuple ,k ,v) ,rk)
                                     ,push-expr))))
                     restkeys)
-             ,(let ((kw-call `(call (call (top kwfunc) ,f) ,container ,f ,@pa)))
-                (if (not (null? keys))
-                    kw-call
-                    `(if (call (top isempty) ,container)
-                         (call ,f ,@pa)
-                         ,kw-call)))))))))
+             ,(if (not (null? keys))
+                  `(call (call (top kwfunc) ,f) ,container ,f ,@pa)
+                  (let* ((expr_stmts (remove-argument-side-effects `(call ,f ,@pa)))
+                         (pa         (cddr (car expr_stmts)))
+                         (stmts      (cdr expr_stmts)))
+                    `(block
+                      ,@stmts
+                      (if (call (top isempty) ,container)
+                          (call ,f ,@pa)
+                          (call (call (top kwfunc) ,f) ,container ,f ,@pa)))))))))))
 
 (define (expand-transposed-op e ops)
   (let ((a (caddr e))
@@ -2761,7 +2765,7 @@ a __hidden__ submodule
   (map (lambda (vi) (list (car vi) (cadr vi) (logand (caddr vi) (lognot 5))))
        vinfos))
 
-(define (convert-lambda lam fname tname)
+(define (convert-lambda lam fname tname interp)
   `(lambda ,(lam:args lam)
      (,(clear-capture-bits (car (lam:vinfo lam)))
       ()
@@ -2769,7 +2773,7 @@ a __hidden__ submodule
       ,(cadddr (lam:vinfo lam)))
      ,(add-box-inits-to-body
        lam
-       (cl-convert (cadddr lam) fname lam (table) #f))))
+       (cl-convert (cadddr lam) fname lam (table) #f interp))))
 
 (define (convert-for-type-decl rhs t)
   (if (eq? t 'Any)
@@ -2778,7 +2782,7 @@ a __hidden__ submodule
 	     (call (top convert) ,t ,rhs)
 	     ,t)))
 
-(define (convert-assignment var rhs fname lam)
+(define (convert-assignment var rhs fname lam interp)
   (let ((vi (assq var (car  (lam:vinfo lam))))
 	(cv (assq var (cadr (lam:vinfo lam)))))
     (let* ((vt  (or (and vi (vinfo:type vi))
@@ -2787,7 +2791,10 @@ a __hidden__ submodule
 	   (rhs (convert-for-type-decl rhs vt)))
       (cond
        ((and cv (vinfo:asgn cv))
-	`(call (top setfield!) (call (top getfield) ,fname (inert ,var))
+	`(call (top setfield!)
+               ,(if interp
+                    `($ ,var)
+                    `(call (top getfield) ,fname (inert ,var)))
 	       (inert contents)
 	       ,rhs))
        ((and vi (vinfo:asgn vi) (vinfo:capt vi))
@@ -2842,31 +2849,33 @@ a __hidden__ submodule
 		    args))
       ,@(list-tail body (+ 1 (length lnos))))))
 
-(define (closure-convert e) (cl-convert e #f #f #f #f))
+(define (closure-convert e) (cl-convert e #f #f #f #f #f))
 
-(define (map-cl-convert exprs fname lam namemap toplevel)
+(define (map-cl-convert exprs fname lam namemap toplevel interp)
   (if toplevel
       (let loop ((exprs exprs)
 		 (stmts '()))
 	(if (null? exprs)
 	    (reverse! stmts)
-	    (let* ((x (lift-toplevel (cl-convert (car exprs) fname lam namemap #f))))
+	    (let* ((x (lift-toplevel (cl-convert (car exprs) fname lam namemap #f interp))))
 	      (loop (cdr exprs)
 		    (cons (car x) (revappend (cdr x) stmts))))))
-      (map (lambda (x) (cl-convert x fname lam namemap #f)) exprs)))
+      (map (lambda (x) (cl-convert x fname lam namemap #f interp)) exprs)))
 
-(define (cl-convert e fname lam namemap toplevel)
+(define (cl-convert e fname lam namemap toplevel interp)
   (if (and (not lam)
 	   (not (and (pair? e) (memq (car e) '(lambda method macro)))))
       (if (atom? e) e
-	  (cons (car e) (map-cl-convert (cdr e) fname lam namemap toplevel)))
+	  (cons (car e) (map-cl-convert (cdr e) fname lam namemap toplevel interp)))
       (cond
        ((symbol? e)
 	(let ((vi (assq e (car  (lam:vinfo lam))))
 	      (cv (assq e (cadr (lam:vinfo lam)))))
 	  (cond ((eq? e fname) e)
 		(cv
-		 (let ((access `(call (top getfield) ,fname (inert ,e))))
+		 (let ((access (if interp
+                                   `($ (call (top QuoteNode) ,e))
+                                   `(call (top getfield) ,fname (inert ,e)))))
 		   (if (vinfo:asgn cv)
 		       `(call (top getfield) ,access (inert contents))
 		       access)))
@@ -2881,8 +2890,8 @@ a __hidden__ submodule
 	  ((quote inert) e)
 	  ((=)
 	   (let ((var (cadr e))
-		 (rhs (cl-convert (caddr e) fname lam namemap toplevel)))
-	     (convert-assignment var rhs fname lam)))
+		 (rhs (cl-convert (caddr e) fname lam namemap toplevel interp)))
+	     (convert-assignment var rhs fname lam interp)))
 	  ((newvar)
 	   (let ((vi (assq (cadr e) (car (lam:vinfo lam)))))
 	     (if (and vi (vinfo:asgn vi) (vinfo:capt vi))
@@ -2908,137 +2917,109 @@ a __hidden__ submodule
                        ,@(cdr (lam:vinfo lam2)))
                       ,(add-box-inits-to-body
                         lam2
-                        (cl-convert (cadddr lam2) 'anon lam2 (table) #f)))))))
+                        (cl-convert (cadddr lam2) 'anon lam2 (table) #f interp)))))))
 	  ((method)
-           (let* ((name  (unwrap-getfield-expr (method-expr-name e)))
-                  ;; TODO: force global mode if method-expr-name returns a getfield expr
-                  (exists (get namemap name #f))
-                  (tname (if exists
-                             exists
-                             (named-gensy name)))
-                  (lam2  (if (length= e 2) #f (cadddr e)))
-                  (vis   (if (length= e 2) '(() () ()) (lam:vinfo lam2)))
-                  (cvs   (delete-duplicates
-                          (apply append
-                                 ;; merge captured vars from all definitions
-                                 (map car (cadr vis))
-                                 (map (lambda (methdef)
-                                        (map car (cadr (lam:vinfo (cadddr methdef)))))
-                                      (expr-find-all
-                                       (lambda (ex)
-                                         (and (eq? (car ex) 'method)
-                                              (not (eq? ex e))
-                                              (length> ex 2)
-                                              (eq? (unwrap-getfield-expr
-                                                    (method-expr-name ex))
-                                                   name)))
-                                       (lam:body lam)
-                                       identity
-                                       (lambda (x) (and (pair? x) (not (eq? (car x) 'lambda)))))))))
-                  (typedef  ;; expression to define the type (if needed)
-                   (cadr
-                    (julia-expand-for-cl-convert
-                     `(thunk
-                       (lambda ()
-                         (scope-block
-                          (block (type #f (<: ,tname (top Function))
-                                       (block ,@cvs)))))))))
-                  (mk-closure  ;; expression to make the closure (if needed)
-                   `(call ,tname ,@(map (lambda (v)
-                                          (let ((cv (assq v (cadr (lam:vinfo lam)))))
-                                            (if cv
-                                                `(call (top getfield) ,fname (inert ,v))
-                                                v)))
-                                        cvs)))
-                  (is-top (or (not lam)
-                              (and (not (assq name (car  (lam:vinfo lam))))
-                                   (not (assq name (cadr (lam:vinfo lam)))))
-                              (eq? name 'call))))
-             (if (length= e 2)  ;; function f end
-                 (if is-top
-                     e
-                     (if exists '(null)
-                         (begin (put! namemap name tname)
-                                `(toplevel-butlast
-                                  ,typedef
-                                  ,(convert-assignment name mk-closure fname lam)))))
-                 (let* ((sig   (caddr e))
+           (let* ((name  (method-expr-name e))
+                  (short (length= e 2))  ;; function f end
+                  (lam2  (if short #f (cadddr e)))
+                  (vis   (if short '(() () ()) (lam:vinfo lam2)))
+                  (cvs   (map car (cadr vis)))
+                  (local? (and lam (symbol? name)
+                               (or (assq name (car  (lam:vinfo lam)))
+                                   (assq name (cadr (lam:vinfo lam))))))
+                  (sig      (and (not short) (caddr e)))
+                  (sp-inits (if short '() (if (eq? (car sig) 'block)
+                                              (butlast (cdr sig))
+                                              '())))
+                  (sig      (and sig (if (eq? (car sig) 'block)
+                                         (last sig)
+                                         sig))))
+             (if (not local?) ;; not a local function; will not be closure converted to a new type
+                 (cond (short e)
+                       ((null? cvs)
+                        `(toplevel-butlast
+                          ,@sp-inits
+                          (method ,name ,sig
+                                  (lambda ,(cadr lam2)
+                                    (,(clear-capture-bits (car vis))
+                                     ,@(cdr vis))
+                                    ,(add-box-inits-to-body
+                                      lam2
+                                      (cl-convert (cadddr lam2) 'anon lam2 (table) #f interp)))
+                                  ,(last e))))
+                       (else
+                        `(block
+                          ,@sp-inits
+                          (method ,name ,sig
+                                  ,(julia-expand-macros
+                                    `(quote
+                                      ,(to-goto-form
+                                        (renumber-jlgensym
+                                         (convert-lambda lam2 '__anon__ #f #t)))))
+                                  ,(last e)))))
+                 ;; local case - lift to a new type at top level
+                 (let* ((exists (get namemap name #f))
+                        (tname  (or exists (named-gensy name)))
+                        (cvs   (delete-duplicates
+                                (apply append
+                                       ;; merge captured vars from all definitions
+                                       cvs
+                                       (map (lambda (methdef)
+                                              (map car (cadr (lam:vinfo (cadddr methdef)))))
+                                            (expr-find-all
+                                             (lambda (ex)
+                                               (and (eq? (car ex) 'method)
+                                                    (not (eq? ex e))
+                                                    (length> ex 2)
+                                                    (eq? (method-expr-name ex)
+                                                         name)))
+                                             (lam:body lam)
+                                             identity
+                                             (lambda (x) (and (pair? x) (not (eq? (car x) 'lambda)))))))))
+                        (typedef  ;; expression to define the type
+                         (cadr
+                          (julia-expand-for-cl-convert
+                           `(thunk
+                             (lambda ()
+                               (scope-block
+                                (block (type #f (<: ,tname (top Function))
+                                             (block ,@cvs)))))))))
+                        (mk-closure  ;; expression to make the closure
+                         `(call ,tname ,@(map (lambda (v)
+                                                (let ((cv (assq v (cadr (lam:vinfo lam)))))
+                                                  (if cv
+                                                      `(call (top getfield) ,fname (inert ,v))
+                                                      v)))
+                                              cvs)))
                         (iskw ;; TODO need more robust version of this
-                         (contains (lambda (x) (eq? x 'kwftype)) sig))
-                        (_ (assert (if iskw (or is-top exists) #t)))
-                        (sp-inits (if (eq? (car sig) 'block)
-                                      (butlast (cdr sig))
-                                      '()))
-                        (sig  (if (eq? (car sig) 'block)
-                                  (last sig)
-                                  sig)))
-                   (if (and is-top (null? cvs))
-                       `(toplevel-butlast
-                         ,@sp-inits
-                         (method ,(cadr e) ,sig
-                                 (lambda ,(cadr lam2)
-                                   (,(clear-capture-bits (car vis))
-                                    ,@(cdr vis))
-                                   ,(add-box-inits-to-body
-                                     lam2
-                                     (cl-convert (cadddr lam2) 'anon lam2 (table) #f)))
-                                 ,(last e)))
-                       `(toplevel-butlast
-                         ,@(if exists
-                               '()
-                               (list
-                                (begin (and name (put! namemap name tname))
-                                       typedef)))
-                         ,@sp-inits
-                         (method #f
-                                 ,(fix-function-arg-type sig tname iskw namemap)
-                                 ,(convert-lambda lam2
-                                                  (if iskw
-                                                      (caddr (lam:args lam2))
-                                                      (car (lam:args lam2)))
-                                                  tname)
-                                 ,(last e))
-                         ,(if exists
-                              '(null)
-                              (if (and lam (or (assq name (car  (lam:vinfo lam)))
-                                               (assq name (cadr (lam:vinfo lam)))))
-                                  (convert-assignment name mk-closure fname lam)
-                                  ;; otherwise, adding method with free variables to a global function.
-                                  ;; lowered to @eval f(x, y...) = ($(clo(fv)))(x, y...)
-                                  (let* ((pass-args
-                                          (map (lambda (arg) (if (symbol? arg)
-                                                                 arg
-                                                                 (list '... arg)))
-                                               (cadr lam2))))
-				    ;; TODO: idea: allow the lambda in a method expr to be evaluated.
-				    ;; then we can use the same method header but generate a backquote
-				    ;; expr to interpolate captured things instead of creating a separate
-				    ;; function and closure. the problem with the separate closure is that
-				    ;; it doesn't delegate the correct function arg (e.g. in keyword arg defs).
-                                    `(call
-                                      (top eval)
-                                      ,(current-julia-module)
-                                      ,(cadr
-                                        (julia-expand-for-cl-convert
-                                         `(quote
-					   (block
-					   (method #f ,(caddr e)
-						   (lambda ,(cadr lam2)
-						     ,(caddr lam2)
-						     (body
-						      (return (call ($ ,mk-closure) ,@pass-args))))
-						   ,(last e)))
-                                           #;(= (call ,head ,@def-args)
-                                              (call ($ ,mk-closure)
-                                                    ,@pass-args)))))))))))))))
+                         (contains (lambda (x) (eq? x 'kwftype)) sig)))
+                   `(toplevel-butlast
+                     ,@(if exists
+                           '()
+                           (list
+                            (begin (and name (put! namemap name tname))
+                                   typedef)))
+                     ,@sp-inits
+                     ,@(if short '()
+                           `((method #f
+                                     ,(fix-function-arg-type sig tname iskw namemap)
+                                     ,(convert-lambda lam2
+                                                      (if iskw
+                                                          (caddr (lam:args lam2))
+                                                          (car (lam:args lam2)))
+                                                      tname #f)
+                                     ,(last e))))
+                     ,(if exists
+                          '(null)
+                          (convert-assignment name mk-closure fname lam interp)))))))
 	  ((lambda)  ;; should only happen inside (thunk ...)
 	   `(lambda ,(cadr e)
 	      (,(clear-capture-bits (car (lam:vinfo e)))
 	       () ,@(cddr (lam:vinfo e)))
 	      (block
-	       ,@(map-cl-convert (cdr (lam:body e)) 'anon e (table) #t))))
+	       ,@(map-cl-convert (cdr (lam:body e)) 'anon e (table) #t interp))))
 	  (else (cons (car e)
-		      (map-cl-convert (cdr e) fname lam namemap toplevel))))))))
+		      (map-cl-convert (cdr e) fname lam namemap toplevel interp))))))))
 
 (define (not-bool e)
   (cond ((memq e '(true #t))  'false)
@@ -3252,7 +3233,7 @@ a __hidden__ submodule
 
 ;; expander entry point
 
-(define (julia-expand-for-cl-convert ex)
+(define (julia-expand-for-cl-convert ex)  ;; expand up to closure-convert
   (analyze-variables
    (flatten-scopes
     (identify-locals
