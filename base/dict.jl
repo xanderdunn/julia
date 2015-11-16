@@ -50,11 +50,12 @@ function _truncate_at_width_or_chars(str, width, chars="", truncmark="…")
 end
 
 showdict(t::Associative; kw...) = showdict(STDOUT, t; kw...)
-function showdict{K,V}(io::IO, t::Associative{K,V}; limit::Bool = false, compact = false,
+function showdict{K,V}(io::IO, t::Associative{K,V}; compact = false,
                        sz=(s = tty_size(); (s[1]-3, s[2])))
     (:SHOWN_SET => t) in io && (print(io, "#= circular reference =#"); return)
 
     recur_io = IOContext(io, :SHOWN_SET => t)
+    limit::Bool = limit_output(io)
     if compact
         # show in a Julia-syntax-like form: Dict(k=>v, ...)
         if isempty(t)
@@ -98,7 +99,7 @@ function showdict{K,V}(io::IO, t::Associative{K,V}; limit::Bool = false, compact
         keylen = 0
         for (i, k) in enumerate(keys(t))
             i > rows && break
-            ks[i] = sprint(show, k)
+            ks[i] = sprint(0, show, k, env=io)
             keylen = clamp(length(ks[i]), keylen, div(cols, 3))
         end
     end
@@ -110,13 +111,13 @@ function showdict{K,V}(io::IO, t::Associative{K,V}; limit::Bool = false, compact
         if limit
             key = rpad(_truncate_at_width_or_chars(ks[i], keylen, "\r\n"), keylen)
         else
-            key = sprint(show, k)
+            key = sprint(0, show, k, env=io)
         end
         print(recur_io, key)
         print(io, " => ")
 
         if limit
-            val = sprint(0, show, v, limit=true)
+            val = sprint(0, show, v, env=io)
             val = _truncate_at_width_or_chars(val, cols - keylen, "\r\n")
             print(recur_io, val)
         else
@@ -138,8 +139,9 @@ summary{T<:Union{KeyIterator,ValueIterator}}(iter::T) =
 show(io::IO, iter::Union{KeyIterator,ValueIterator}) = show(io, collect(iter))
 
 showkv(iter::Union{KeyIterator,ValueIterator}; kw...) = showkv(STDOUT, iter; kw...)
-function showkv{T<:Union{KeyIterator,ValueIterator}}(io::IO, iter::T; limit::Bool = false,
+function showkv{T<:Union{KeyIterator,ValueIterator}}(io::IO, iter::T;
                                                      sz=(s = tty_size(); (s[1]-3, s[2])))
+    limit::Bool = limit_output(io)
     rows, cols = sz
     print(io, summary(iter))
     isempty(iter) && return
@@ -156,7 +158,7 @@ function showkv{T<:Union{KeyIterator,ValueIterator}}(io::IO, iter::T; limit::Boo
         limit && i >= rows && (print(io, "⋮"); break)
 
         if limit
-            str = sprint(0, show, v, limit=true)
+            str = sprint(0, show, v, env=io)
             str = _truncate_at_width_or_chars(str, cols, "\r\n")
             print(io, str)
         else
@@ -236,6 +238,7 @@ filter(f, d::Associative) = filter!(f,copy(d))
 eltype{K,V}(::Type{Associative{K,V}}) = Pair{K,V}
 
 function isequal(l::Associative, r::Associative)
+    l === r && return true
     if isa(l,ObjectIdDict) != isa(r,ObjectIdDict)
         return false
     end
@@ -249,6 +252,7 @@ function isequal(l::Associative, r::Associative)
 end
 
 function ==(l::Associative, r::Associative)
+    l === r && return true
     if isa(l,ObjectIdDict) != isa(r,ObjectIdDict)
         return false
     end

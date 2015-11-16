@@ -3565,7 +3565,7 @@ Show an expression and result, returning the result.
 doc"""
     showcompact(x)
 
-Show a more compact representation of a value. This is used for printing array elements. If a new type has a different compact representation, it should overload `showcompact(io, x)` where the first argument is a stream.
+Show a more compact representation of a value. This is used for printing array elements. If a new type has a different compact representation, it should test `Base.limit_output(io)` in its `show` method.
 """
 showcompact
 

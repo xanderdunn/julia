@@ -1,7 +1,8 @@
 # This file is a part of Julia. License is MIT: http://julialang.org/license
 
 # fallback text/plain representation of any type:
-writemime(io::IO, ::MIME"text/plain", x) = showlimited(io, x)
+writemime(io::IO, ::MIME"text/plain", x) = showcompact(io, x)
+writemime(io::IO, ::MIME"text/plain", x::Number) = show(io, x)
 
 function writemime(io::IO, ::MIME"text/plain", f::Function)
     if isgeneric(f)
@@ -41,11 +42,6 @@ function writemime(io::IO, ::MIME"text/plain", v::DataType)
     show(io, v)
     # TODO: maybe show constructor info?
 end
-
-writemime(io::IO, ::MIME"text/plain", t::Associative) =
-    showdict(io, t, limit=true)
-writemime(io::IO, ::MIME"text/plain", t::Union{KeyIterator, ValueIterator}) =
-    showkv(io, t, limit=true)
 
 function writemime(io::IO, ::MIME"text/plain", t::Task)
     show(io, t)
