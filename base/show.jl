@@ -1,48 +1,74 @@
 # This file is a part of Julia. License is MIT: http://julialang.org/license
 
 show(x) = show(STDOUT::IO, x)
-print(io::IO, s::Symbol) = (write(io,s);nothing)
+print(io::IO, s::Symbol) = (write(io,s); nothing)
 
 immutable IOContext{IO_t <: IO} <: AbstractPipe
     io::IO_t
-    lock::ReentrantLock
-    limit_output::Bool
     hasproperty::Bool
     propertykey::Any
     propertyvalue::Any
     parent::IOContext
-    function IOContext(io::IO, limit_output::Bool=false)
-        assert(!isa(io, IOContext))
-        new(io, ReentrantLock(), limit_output, false, nothing, nothing, #=null=#)
-    end
-    function IOContext(io::IO, KV::Pair)
-        assert(!isa(io, IOContext))
-        new(io, ReentrantLock(), false, true, first(KV), last(KV), #=null=#)
-    end
-    IOContext(io::IOContext, limit_output::Bool) =
-        new(io.io, io.lock, limit_output, false, nothing, nothing, io)
+
+    IOContext(io::IO) =
+        new(io, false, nothing, nothing, #=null=#)
+    IOContext(io::IOContext) = io
+
+    IOContext(io::IO, KV::Pair) =
+        new(io, true, first(KV), last(KV), #=null=#)
     IOContext(io::IOContext, KV::Pair) =
-        new(io.io, io.lock, io.limit_output, true, first(KV), last(KV), io)
+        new(io.io, true, first(KV), last(KV), io)
+
+    IOContext(io::IO, context::IOContext) =
+        new(io, false, nothing, nothing, context)
+    IOContext(io::IOContext, context::IOContext) =
+        new(io.io, false, nothing, nothing, context)
 end
-IOContext(io::IO, arg=false) = IOContext{typeof(io)}(io, arg)
-IOContext(io::IOContext, arg=io.limit_output) = typeof(io)(io, arg)
-IOContext(io::IOContext, key, value) = typeof(io)(io, Pair{Any, Any}(key, value))
+
+"""
+    IOContext{<:IO} <: IO
+
+IOContext provides a mechanism for passing output-configuration keyword arguments through arbitrary show methods.
+
+In short, it is an immutable Dictionary that is a subclass of IO.
+
+    IOContext(io::IO, KV::Pair)
+
+Create a new entry in the IO Dictionary for the key => value pair
+
+ - use `(key => value) in dict` to see if this particular combination is in the properties set
+ - use `get(dict, key, default)` to retrieve the most recent value for a particular key
+
+    IOContext(io::IO, context::IOContext)
+
+Create a IOContext that wraps an alternate IO but inherits the keyword arguments from the context
+"""
+IOContext
+
+IOContext(io::IO) = IOContext{typeof(io)}(io, arg)
+IOContext(io::IOContext) = io
+
+IOContext(io::IO, arg) = IOContext{typeof(io)}(io, arg)
+IOContext(io::IOContext, arg) = typeof(io)(io, arg)
+
+IOContext(io::IO, key, value) = IOContext(io, Pair{Any, Any}(key, value))
+
 show(io::IO, ctx::IOContext) = (print(io, "IOContext("); show(io, ctx.io); print(io, ")"))
 
 pipe_reader(io::IOContext) = io.io
 pipe_writer(io::IOContext) = io.io
-lock(io::IOContext) = (lock(io.io); lock(io.lock)) # double lock, because IO itself might not be lockable
-unlock(io::IOContext) = (unlock(io.io); unlock(io.lock))
+lock(io::IOContext) = lock(io.io)
+unlock(io::IOContext) = unlock(io.io)
 
 limit_output(::ANY) = false
-limit_output(io::IOContext) = io.limit_output
-function in{I<:IOContext}(value, io_key::Pair{I})
-    io, key = io_key
+limit_output(io::IOContext) = get(io, :limit_output, false) === true
+function in(key_value::Pair, io::IOContext)
+    key, value = key_value
     io.hasproperty && io.propertykey == key && io.propertyvalue == value && return true
-    isdefined(io, :parent) && return in(value, io.parent => key)
+    isdefined(io, :parent) && return in(key_value, io.parent)
     return false
 end
-in{I<:IO}(value, io_key::Pair{I}) = false
+in(key_value::Pair, io::IO) = false
 
 function getindex(io::IOContext, key)
     io.hasproperty && io.propertykey == key && return io.propertyvalue
@@ -62,7 +88,7 @@ function show_default(io::IO, x::ANY)
     print(io, '(')
     nf = nfields(t)
     if nf != 0 || t.size==0
-        if x in (io => :SHOWN_SET)
+        if (:SHOWN_SET => x) in io
             print(io, "#= circular reference =#")
         else
             recur_io = IOContext(io, :SHOWN_SET => x)
@@ -394,7 +420,7 @@ end
 ## AST printing helpers ##
 
 typeemphasize(::IO) = false
-typeemphasize(io::IOContext) = get(io, :TYPEEMPHASIZE, false)::Bool
+typeemphasize(io::IOContext) = get(io, :TYPEEMPHASIZE, false) === true
 
 const indent_width = 4
 
@@ -803,7 +829,7 @@ function show_unquoted(io::IO, ex::Expr, indent::Int, prec::Int)
     else
         show_type = false
         emphstate = typeemphasize(io)
-        if emphstate && ex.head !== :lambda && ex.head !== method
+        if emphstate && ex.head !== :lambda && ex.head !== :method
             io = IOContext(io, :TYPEEMPHASIZE => false)
         end
         print(io, "\$(Expr(")
@@ -1377,7 +1403,7 @@ function showall(io::IO, x)
     if !limit_output(io)
         show(io, x)
     else
-        show(IOContext(io, false), x)
+        show(IOContext(io, :limit_output => false), x)
     end
 end
 
@@ -1386,7 +1412,7 @@ function showlimited(io::IO, x)
     if limit_output(io)
         show(io, x)
     else
-        show(IOContext(io, true), x)
+        show(IOContext(io, :limit_output => true), x)
     end
 end
 

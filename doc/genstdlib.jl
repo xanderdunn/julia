@@ -288,7 +288,8 @@ end
 for folder in ["stdlib", "manual", "devdocs"]
     println("\nConverting $folder/\n")
     for file in readdir("$folder")
-        translate("$folder/$file")
+        file[1] === '.' ||
+            translate("$folder/$file")
     end
 end
 

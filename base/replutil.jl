@@ -22,7 +22,7 @@ function writemime(io::IO, ::MIME"text/plain", r::Range)
     print(io, summary(r))
     if !isempty(r)
         println(io, ":")
-        print_range(IOContext(io, true), r)
+        print_range(IOContext(io, :limit_output => true), r)
     end
 end
 
@@ -30,12 +30,12 @@ function writemime(io::IO, ::MIME"text/plain", v::AbstractVector)
     print(io, summary(v))
     if !isempty(v)
         println(io, ":")
-        print_matrix(IOContext(io, true), v)
+        print_matrix(IOContext(io, :limit_output => true), v)
     end
 end
 
 writemime(io::IO, ::MIME"text/plain", v::AbstractArray) =
-    showarray(IOContext(io, true), v, header=true, repr=false)
+    showarray(IOContext(io, :limit_output => true), v, header=true, repr=false)
 
 function writemime(io::IO, ::MIME"text/plain", v::DataType)
     show(io, v)

@@ -52,7 +52,7 @@ end
 showdict(t::Associative; kw...) = showdict(STDOUT, t; kw...)
 function showdict{K,V}(io::IO, t::Associative{K,V}; limit::Bool = false, compact = false,
                        sz=(s = tty_size(); (s[1]-3, s[2])))
-    t in (io => :SHOWN_SET) && (print(io, "#= circular reference =#"); return)
+    (:SHOWN_SET => t) in io && (print(io, "#= circular reference =#"); return)
 
     recur_io = IOContext(io, :SHOWN_SET => t)
     if compact

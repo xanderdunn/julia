@@ -29,10 +29,10 @@ println(xs...) = println(STDOUT, xs...)
 
 ## conversion of general objects to strings ##
 
-function sprint(size::Integer, f::Function, args...; env=false)
+function sprint(size::Integer, f::Function, args...; env=nothing)
     s = IOBuffer(Array(UInt8,size), true, true)
     truncate(s,0)
-    if env !== false
+    if env !== nothing
         f(IOContext(s, env), args...)
     else
         f(s, args...)
