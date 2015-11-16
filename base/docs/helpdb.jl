@@ -531,22 +531,21 @@ Collections.isheap
 
 doc"""
 ```rst
-..  print([io::IO = STDOUT,] [data::Vector]; format = :tree, C = false, combine = true, cols = tty_cols())
+..  print([io::IO = STDOUT,] [data::Vector]; format = :tree, C = false, combine = true)
 
 Prints profiling results to ``io`` (by default, ``STDOUT``). If you
 do not supply a ``data`` vector, the internal buffer of accumulated
 backtraces will be used.  ``format`` can be ``:tree`` or
 ``:flat``. If ``C==true``, backtraces from C and Fortran code are
 shown. ``combine==true`` merges instruction pointers that
-correspond to the same line of code.  ``cols`` controls the width
-of the display.
+correspond to the same line of code.
 ```
 """
 Profile.print(io::IO = STDOUT, data::Vector=?)
 
 doc"""
 ```rst
-..  print([io::IO = STDOUT,] data::Vector, lidict::Dict; format = :tree, combine = true, cols = tty_cols())
+..  print([io::IO = STDOUT,] data::Vector, lidict::Dict; format = :tree, combine = true)
 
 Prints profiling results to ``io``. This variant is used to examine
 results exported by a previous call to :func:`retrieve`.
