@@ -34,8 +34,10 @@ end
 
 warn_color()   = repl_color("JULIA_WARN_COLOR", default_color_warn)
 info_color()   = repl_color("JULIA_INFO_COLOR", default_color_info)
-input_color()  = text_colors[repl_color("JULIA_INPUT_COLOR", default_color_input)]
-answer_color() = text_colors[repl_color("JULIA_ANSWER_COLOR", default_color_answer)]
+input_color_symbol()  = repl_color("JULIA_INPUT_COLOR", default_color_input)
+input_color()  = text_colors[input_color_symbol()]
+answer_color_symbol() = repl_color("JULIA_ANSWER_COLOR", default_color_answer)
+answer_color() = text_colors[answer_color_symbol()]
 
 exit(n) = ccall(:jl_exit, Void, (Int32,), n)
 exit() = exit(0)
@@ -387,7 +389,7 @@ function _start()
                 term = Terminals.TTYTerminal(get(ENV,"TERM",@windows? "" : "dumb"),STDIN,STDOUT,STDERR)
                 global is_interactive = true
                 color_set || (global have_color = Terminals.hascolor(term))
-                quiet || REPL.banner(term,term)
+                quiet || banner(term)
                 if term.term_type == "dumb"
                     active_repl = REPL.BasicREPL(term)
                     quiet || warn("Terminal not fully functional")
