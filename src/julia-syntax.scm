@@ -2626,9 +2626,49 @@ So far only the second case can actually occur.
 (define (free-vars e)
   (table.keys (free-vars- e (table) *free-vars-secret-value*)))
 
-; convert each lambda's (locals ...) to
-;   (var-info-lst captured-var-infos gensyms static_params)
-; where var-info-lst is a list of var-info records
+(define (filter2 f a b) (append (filter f a) (filter f b)))
+
+(define (analyze-vars-lambda e env captvars sp new-sp)
+  (let* ((args (lam:args e))
+	 (locl (cdr (caddr e)))
+	 (allv (nconc (map arg-name args) locl))
+	 (fv   (let* ((fv (diff (free-vars (lam:body e)) allv))
+		      ;; add variables referenced in declared types for free vars
+		      (dv (apply nconc (map (lambda (v)
+					      (let ((vi (var-info-for v env)))
+						(if vi (free-vars (vinfo:type vi)) '())))
+					    fv))))
+		 (append (diff dv fv) fv)))
+	 (glo  (find-global-decls (lam:body e)))
+	 ;; make var-info records for vars introduced by this lambda
+	 (vi   (nconc
+		(map (lambda (decl) (make-var-info (decl-var decl)))
+		     args)
+		(map make-var-info locl)))
+	 ;; captured vars: vars from the environment that occur
+	 ;; in our set of free variables (fv).
+	 (cv    (filter2 (lambda (v) (and (memq (vinfo:name v) fv)
+					  (not (memq (vinfo:name v) glo))))
+			 env (map make-var-info sp)))
+	 (bod   (analyze-vars
+		 (flatten-blocks (lam:body e))
+		 (append vi
+			 ;; new environment: add our vars
+			 (filter (lambda (v)
+				   (and (not (memq (vinfo:name v) allv))
+					(not (memq (vinfo:name v) glo))))
+				 env))
+		 cv (delete-duplicates (append new-sp sp)))))
+    ;; mark all the vars we capture as captured
+    (for-each (lambda (v) (vinfo:set-capt! v #t))
+	      cv)
+    `(lambda ,args
+       (,vi ,cv 0 ,new-sp)
+       ,bod)))
+
+;; convert each lambda's (locals ...) to
+;;   (var-info-lst captured-var-infos gensyms static_params)
+;; where var-info-lst is a list of var-info records
 (define (analyze-vars e env captvars sp)
   (if (or (atom? e) (quoted? e))
       e
@@ -2659,43 +2699,7 @@ So far only the second case can actually occur.
                       '(null))
                `(call (top typeassert) ,(cadr e) ,(caddr e)))))
         ((lambda)
-         (let* ((args (lam:args e))
-                (locl (cdr (caddr e)))
-                (allv (nconc (map arg-name args) locl))
-                (fv   (let* ((fv (diff (free-vars (lam:body e)) allv))
-                             ;; add variables referenced in declared types for free vars
-                             (dv (apply nconc (map (lambda (v)
-                                                     (let ((vi (var-info-for v env)))
-                                                       (if vi (free-vars (vinfo:type vi)) '())))
-                                                   fv))))
-                        (append (diff dv fv) fv)))
-                (glo  (find-global-decls (lam:body e)))
-                ;; make var-info records for vars introduced by this lambda
-                (vi   (nconc
-                       (map (lambda (decl) (make-var-info (decl-var decl)))
-                            args)
-                       (map make-var-info locl)))
-                ;; captured vars: vars from the environment that occur
-                ;; in our set of free variables (fv).
-                (cv    (filter (lambda (v) (and (memq (vinfo:name v) fv)
-                                                (not (memq
-                                                      (vinfo:name v) glo))))
-                               env))
-                (bod   (analyze-vars
-                        (flatten-blocks (lam:body e))
-                        (append vi
-                                ;; new environment: add our vars
-                                (filter (lambda (v)
-                                          (and (not (memq (vinfo:name v) allv))
-                                               (not (memq (vinfo:name v) glo))))
-                                        env))
-                        cv sp)))
-           ;; mark all the vars we capture as captured
-           (for-each (lambda (v) (vinfo:set-capt! v #t))
-                     cv)
-           `(lambda ,args
-              (,vi ,cv 0 ,sp)
-              ,bod)))
+	 (analyze-vars-lambda e env captvars sp '()))
 	;; TODO hopefully remove this
         #;((localize)
          ;; special feature for @spawn that wraps a piece of code in a "let"
@@ -2712,8 +2716,9 @@ So far only the second case can actually occur.
               env captvars sp))))
 	((with-static-parameters)
 	 ;; (with-static-parameters func_expr sp_1 sp_2 ...)
-	 (analyze-vars (cadr e) env captvars
-		       (delete-duplicates (append sp (cddr e)))))
+	 (assert (eq? (car (cadr e)) 'lambda))
+	 (analyze-vars-lambda (cadr e) env captvars sp
+			      (cddr e)))
         ((method)
          (let ((vi (var-info-for (method-expr-name e) env)))
            (if vi
@@ -2727,9 +2732,9 @@ So far only the second case can actually occur.
 	     `(method ,(cadr e))
 	     `(method ,(cadr e)
 		      ,(analyze-vars (caddr  e) env captvars sp)
-		      ,(analyze-vars (cadddr e) env captvars
-				     (delete-duplicates
-				      (append sp (method-expr-static-parameters e))))
+		      ,(begin (assert (eq? (car (cadddr e)) 'lambda))
+			      (analyze-vars-lambda (cadddr e) env captvars sp
+						   (method-expr-static-parameters e)))
 		      ,(caddddr e))))
 	((module) e)
         (else (cons (car e)
@@ -2788,7 +2793,10 @@ a __hidden__ submodule
     (let* ((vt  (or (and vi (vinfo:type vi))
 		    (and cv (vinfo:type cv))
 		    'Any))
-	   (rhs (convert-for-type-decl rhs vt)))
+	   (rhs (convert-for-type-decl rhs
+				       (if (eq? vt 'Any)
+					   vt
+					   (cl-convert vt fname lam #f #f interp)))))
       (cond
        ((and cv (vinfo:asgn cv))
 	`(call (top setfield!)
